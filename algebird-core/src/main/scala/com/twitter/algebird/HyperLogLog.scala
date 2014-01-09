@@ -19,6 +19,18 @@ package com.twitter.algebird
 
 import java.nio.ByteBuffer
 
+/** A super lightweight (hopefully) version of BitSet */
+case class BitSetLite(in: Array[Byte]) {
+  def contains(x: Int): Boolean = {
+    /** Pretend 'in' is little endian so that the bitstring b0b1b2b3 is such that if b0 == 1, then
+     *  0 is in the bitset, if b1 == 1, then 1 is in the bitset.
+     */
+    val arrayIdx = x/8
+    val remainder = x%8
+    ((in(arrayIdx) >> (7 - remainder)) & 1) == 1
+  }
+}
+
 /** Implementation of the HyperLogLog approximate counting as a Monoid
  * @link http://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf
  *
@@ -59,47 +71,46 @@ object HyperLogLog {
 
   def twopow(i : Int) : Double = scala.math.pow(2.0, i)
 
-
-   /** Find the first non zero bit
-    */
-  private def countZero(x: Byte, startBit: Int): Int = {
-    var numZero = 1
-    var test = 1 << (7 - startBit)
-    while ((test & x) == 0 && test > 0) {
-      test = test >> 1
-      numZero += 1
+  /** the value 'j' is equal to <w_0, w_1 ... w_(bits-1)>
+   *  TODO: We could read in a byte at a time.
+   */
+  def j(bsl: BitSetLite, bits: Int): Int = {
+    @annotation.tailrec
+    def loop(pos: Int, accum: Int): Int = {
+      if (pos >= bits) {
+        accum
+      } else if (bsl.contains(pos)) {
+        loop(pos + 1, accum + (1 << pos))
+      } else {
+        loop(pos + 1, accum)
+      }
     }
-    numZero
+    loop(0, 0)
   }
 
-   /** Check if the number is zero
-    */
-  private def allZero(x: Byte, startBit: Int): Boolean = (x << startBit).toByte == 0
-
-    /** We are computing j and \rho(w) from the paper,
-     *  sorry for the name, but it allows someone to compare to the paper extremely low probability
-     *  rhow (position of the leftmost one bit) is > 127, so we use a Byte to store it
-     *  Given a hash <w_0, w_1, w_2 ... w_n> the value 'j' is equal to <w_0, w_1 ... w_(bits-1)> and
-     *  the value 'w' is equal to <w_bits ... w_n>. The function rho counts the number of leading
-     *  zeroes in 'w'. We can calculate rho(w) at once with the method rhoW.
-     */
-  def jRhoW(in : Array[Byte], bits: Int) : (Int,Byte) = {
-    val s8p = scala.math.ceil(bits / 8.0).toInt
-    val s8m = scala.math.floor(bits / 8.0).toInt
-    val longArr = Array.fill[Byte](8 - s8p)(0) ++ in.slice(0, s8p)
-    var hashNum = ByteBuffer.wrap(longArr).getLong
-    hashNum = (hashNum >> (8 - bits % 8) % 8)
-    var numZero: Byte = 0
-    var i = s8m
-    var startBit = (bits % 8)
-    while(i < in.length && allZero(in(i), startBit)) {
-      numZero = (numZero + 8 - startBit).toByte
-      startBit = 0
-      i+=1
-    }
-    numZero = (numZero + countZero(in(i), startBit)).toByte
-    (hashNum.toInt, numZero)
+  /** The value 'w' is equal to <w_bits ... w_n>. The function rho counts the number of leading 
+   *  zeroes in 'w'. We can calculate rho(w) at once with the method rhoW.
+   */
+  def rhoW(bsl: BitSetLite, bits: Int): Byte = {
+    @annotation.tailrec
+    def loop(pos: Int, zeros: Int): Int =
+      if (bsl.contains(pos)) zeros
+      else loop(pos + 1, zeros + 1)
+    loop(bits, 1).toByte
   }
+
+  /** We are computing j and \rho(w) from the paper,
+   *  sorry for the name, but it allows someone to compare to the paper extremely low probability 
+   *  rhow (position of the leftmost one bit) is > 127, so we use a Byte to store it
+   *  Given a hash <w_0, w_1, w_2 ... w_n> the value 'j' is equal to <w_0, w_1 ... w_(bits-1)> and 
+   *  the value 'w' is equal to <w_bits ... w_n>. The function rho counts the number of leading 
+   *  zeroes in 'w'. We can calculate rho(w) at once with the method rhoW.
+   */
+  def jRhoW(in: Array[Byte], bits: Int): (Int, Byte) = {
+    val onBits = BitSetLite(in)
+    (j(onBits, bits), rhoW(onBits, bits))
+  }
+
 
   def toBytes(h : HLL) : Array[Byte] = {
     h match {
