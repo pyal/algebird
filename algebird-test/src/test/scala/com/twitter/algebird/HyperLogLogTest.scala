@@ -56,20 +56,6 @@ object HyperLogLogLaws extends Properties("HyperLogLog") {
   property("HyperLogLog is a Monoid") = monoidLawsEq[HLL]{_.toDenseHLL == _.toDenseHLL}
 }
 
-/* Ensure jRhoW matches referenceJRhoW */
-object jRhoWMatchTest extends Properties("jRhoWMatch") {
-  import HyperLogLog._
-
-  implicit val hashGen = Arbitrary { containerOfN[Array, Byte](16, arbitrary[Byte]) }
-  /* For some reason choose in this version of scalacheck
-  is bugged so I need the suchThat clause */
-  implicit val bitsGen = Arbitrary { choose(4, 31) suchThat (x => x >= 4 && x <= 31) }
-
-  property("jRhoW matches referenceJRhoW") = forAll { (in: Array[Byte], bits: Int) =>
-    jRhoW(in, bits) == ReferenceHyperLogLog.jRhoW(in, bits)
-  }
-}
-
 class HyperLogLogTest extends Specification {
 
   import HyperLogLog._ //Get the implicit int2bytes, long2Bytes
